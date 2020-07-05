@@ -1,0 +1,51 @@
+<html>
+  <head>
+    <link rel="stylesheet" href="styles.css">
+    <script src="sorttable.js"></script>
+  </head>
+  <body>
+    <table class="sortable">
+      <tr>
+        <th class="sorttable_nosort"></th>
+        <th class="sorttable_nosort"></th>
+        <th>Total tweets</th>
+        <th>Follows back?</th>
+        <th>Followers/Following</th>
+        <th>Tweets</th>
+        <th>Liked</th>
+        <th>%</th>
+        <th>Retweeted</th>
+        <th>%</th>
+        <th>Quoted</th>
+        <th>%</th>
+        <th>Replied</th>
+        <th>%</th>
+        <th>Score</th>
+      </tr>
+      {% for fren in frens %}
+      <tr>
+        <td><img src="{{ fren.pfp_url }}" alt="Profile Picture" width=50 height=50></td>
+        <td class="profileColumn">
+          <span class="displayName">{{ fren.name }}</span>
+          <p class="nameSeparator">
+            <span class="atName"><a href="{{ fren.url() }}">@{{ fren.at }}</a></span>
+          </p>
+        </td>
+        <td>{{ fren.total_tweets }}</td>
+        <td>{{ fren.follows_back }}</td>
+        <td>{{ fren.ratio() }}</td>
+        <td>{{ fren.tweets }}</td>
+        <td>{{ fren.liked }}</td>
+        <td>{{ fren.liked_ratio() }}%</td>
+        <td>{{ fren.retweeted }}</td>
+        <td>{{ fren.retweeted_ratio() }}%</td>
+        <td>{{ fren.quoted }}</td>
+        <td>{{ fren.quoted_ratio() }}%</td>
+        <td>{{ fren.replied }}</td>
+        <td>{{ fren.replied_ratio() }}%</td>
+        <td>{{ fren.score() }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </body>
+</html>

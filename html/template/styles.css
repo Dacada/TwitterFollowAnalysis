@@ -1,0 +1,43 @@
+table.sortable thead {
+    background-color:#eee;
+    color:#666666;
+    font-weight: bold;
+    cursor: default;
+}
+table.sortable th:not(.sorttable_sorted):not(.sorttable_sorted_reverse):not(.sorttable_nosort):after { 
+    content: " \25B4\25BE" 
+}
+table.sortable tbody tr:nth-child(2n) td {
+  background: #ffcccc;
+}
+table.sortable tbody tr:nth-child(2n+1) td {
+  background: #ccffff;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+.profileColumn {
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+.displayName {
+    font-family: system-ui;
+    font-size: 18px;
+}
+.nameSeparator{
+    margin-top: 0;
+}
+.atName {
+    font-family: system-ui;
+    color: #777777;
+}
+thead th
+{
+    position: sticky;
+    top: 0px;
+}
