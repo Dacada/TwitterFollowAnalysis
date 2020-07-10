@@ -75,7 +75,6 @@ class User:
     def replied_ratio(self):
         return self._ratio(self.replied)
 
-    @format_float
     def score(self):
         if self.tweets == 0:
             return 0
@@ -89,7 +88,7 @@ class User:
             else:
                 score /= max(1, self.tweets * (self.following/self.followers))
 
-        return score
+        return int(score)
 
 
 def get_script_path():
