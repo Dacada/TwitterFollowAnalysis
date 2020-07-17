@@ -24,6 +24,11 @@ def format_float(f):
     return wrapper
 
 
+def yesorno(prompt):
+    a = input(prompt + ' ').lower()
+    return a == 'y' or a == 'yes'
+
+
 @dataclasses.dataclass
 class User:
     id: str
@@ -255,9 +260,99 @@ def show_fren_info(frens):
     webbrowser.open(goalurl.geturl())
 
 
+def tweet_best_frens(frens):
+    api = get_api('config.json')
+
+    frens.sort(key=lambda fren: fren.score(), reverse=True)
+    best_frens = frens[:15]
+
+    tweet1 = "The machine has come to its conclusion. "
+    tweet1 += "The top 15 best accounts I follow are:\n\n"
+    for i, fren in enumerate(best_frens[:5]):
+        at = '@'+fren.at
+        if i == 0:
+            tweet1 += '🥇'
+        elif i == 1:
+            tweet1 += '🥈'
+        elif i == 2:
+            tweet1 += '🥉'
+        else:
+            tweet1 += '🏅'
+        tweet1 += ' ' + at + '\n'
+
+    tweet2 = "The next 10:\n\n"
+    for fren in best_frens[5:]:
+        at = '@'+fren.at
+        tweet2 += '🏅 ' + at + '\n'
+
+    print("Gonna tweet the following:")
+    print('='*15)
+    print(tweet1)
+    print('-'*15)
+    print(tweet2)
+    print('='*15)
+
+    if not yesorno("Tweet this?"):
+        print("Not tweeted")
+        return
+
+    t = api.update_status(tweet1, trim_user=True, wait_on_rate_limit=True)
+    api.update_status(tweet2, trim_user=True,
+                      wait_on_rate_limit=True, in_reply_to_status_id=t.id)
+
+
+def unfollow_worst_frens(frens):
+    api = get_api('config.json')
+
+    frens.sort(key=lambda fren: fren.score())
+    worst_score = frens[0].score()
+    worst_frens = []
+    for fren in frens:
+        if fren.score() <= worst_score:
+            worst_frens.append(fren)
+        else:
+            break
+    worst_frens.sort(key=lambda fren: fren.tweets)
+
+    unfollowed = 0
+    for fren in worst_frens:
+        print("About to unfollow @" + fren.at)
+        print(fren.url())
+
+        if fren.follows_back:
+            print("\t* Follows back.")
+        else:
+            print("\t* Does not follow back.")
+        print(f"\t* Tweets: {fren.tweets}")
+        print(f"\t* Likes: {fren.liked} ({fren.liked_ratio()}%)")
+        print(f"\t* RTs: {fren.retweeted} ({fren.retweeted_ratio()}%)")
+        print(f"\t* QRTs: {fren.quoted} ({fren.quoted_ratio()}%)")
+        print(f"\t* Replies: {fren.replied} ({fren.replied_ratio()}%)")
+        print(f"\t* SCORE: {fren.score()}")
+
+        if yesorno("Unfollow?"):
+            api.destroy_friendship(fren.id)
+            unfollowed += 1
+            if unfollowed == 15:
+                break
+        print()
+
+
 def main():
+    if len(sys.argv) < 2:
+        print('call with an option, one of:')
+        print('\tshow')
+        print('\ttweet')
+        print('\tunfollow')
+
     frens = get_fren_info()
-    show_fren_info(frens)
+
+    if sys.argv[1] == 'show':
+        show_fren_info(frens)
+    elif sys.argv[1] == 'tweet':
+        tweet_best_frens(frens)
+    elif sys.argv[1] == 'unfollow':
+        unfollow_worst_frens(frens)
 
 
 if __name__ == '__main__':
