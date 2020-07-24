@@ -344,6 +344,7 @@ def main():
         print('\tshow')
         print('\ttweet')
         print('\tunfollow')
+        exit(1)
 
     frens = get_fren_info()
 
