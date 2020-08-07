@@ -266,9 +266,12 @@ def tweet_best_frens(frens):
     frens.sort(key=lambda fren: fren.score(), reverse=True)
     best_frens = frens[:15]
 
-    tweet1 = "The machine has come to its conclusion. "
-    tweet1 += "The top 15 best accounts I follow are:\n\n"
-    for i, fren in enumerate(best_frens[:5]):
+    tweet1 = "The algorithm has come to its weekly conclusion.\n"
+    tweet1 += "Data from the last 4 weeks of activity has been analyzed.\n"
+    tweet1 += "These are the best 15 accounts I follow.\n"
+    tweet1 += "You should consider following them, too.\n\n"
+    tweet1 += "Top 3:\n"
+    for i, fren in enumerate(best_frens[:3]):
         at = '@'+fren.at
         if i == 0:
             tweet1 += '🥇'
@@ -280,8 +283,8 @@ def tweet_best_frens(frens):
             tweet1 += '🏅'
         tweet1 += ' ' + at + '\n'
 
-    tweet2 = "The next 10:\n\n"
-    for fren in best_frens[5:]:
+    tweet2 = "The next 12:\n"
+    for fren in best_frens[3:]:
         at = '@'+fren.at
         tweet2 += '🏅 ' + at + '\n'
 
@@ -312,7 +315,8 @@ def unfollow_worst_frens(frens):
             worst_frens.append(fren)
         else:
             break
-    worst_frens.sort(key=lambda fren: fren.tweets)
+    worst_frens.sort(key=lambda fren: int(
+        fren.follows_back)*100000 + fren.tweets)
 
     unfollowed = 0
     for fren in worst_frens:
