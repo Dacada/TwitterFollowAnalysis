@@ -12,8 +12,26 @@ import webbrowser
 import urllib
 import logging
 import functools
+import textwrap
 import tweepy
 import jinja2
+
+
+INFO_TWEET_TEXT_1 = """
+Every week I run this algorithm, which takes all the accounts I'm following
+and counts how many of their tweets I've interacted with over the last four
+weeks. Then I do things with this information, like a shoutout to the best
+ones."""
+
+INFO_TWEET_TEXT_2 = """
+The source code for this bot is open and can be found here:
+
+https://github.com/Dacada/TwitterFollowAnalysis
+"""
+
+
+def clean_whitespace(s):
+    return ' '.join(textwrap.dedent(s).split()).strip()
 
 
 def format_float(f):
@@ -260,18 +278,45 @@ def show_fren_info(frens):
     webbrowser.open(goalurl.geturl())
 
 
+def create_info_tweet(api):
+    logging.warning("Creating info tweet!")
+    s = api.update_status(clean_whitespace(INFO_TWEET_TEXT_1), trim_user=True,
+                          wait_on_rate_limit=True)
+    api.update_status(clean_whitespace(INFO_TWEET_TEXT_2), trim_user=True,
+                      wait_on_rate_limit=True, in_reply_to_status_id=s.id)
+    return s.id
+
+
+def get_or_create_info_tweet(api, filename):
+    with open(filename) as f:
+        config = json.load(f)
+
+    try:
+        info_tweet_id = config['info-tweet']
+        api.get_status(info_tweet_id, trim_user=True, wait_on_rate_limit=True)
+    except (KeyError, tweepy.error.TweepError):
+        info_tweet_id = create_info_tweet(api)
+        config['info-tweet'] = info_tweet_id
+        with open(filename, 'w') as f:
+            json.dump(config, f)
+
+    return info_tweet_id
+
+
 def tweet_best_frens(frens):
     api = get_api('config.json')
+    info_tweet = get_or_create_info_tweet(api, 'config.json')
+    info_tweet_url = f'https://twitter.com/{api.me().id}/status/{info_tweet}'
 
+    sep = 10
+    total = 20
     frens.sort(key=lambda fren: fren.score(), reverse=True)
-    best_frens = frens[:15]
+    best_frens = frens[:total]
 
-    tweet1 = "The algorithm has come to its weekly conclusion.\n"
-    tweet1 += "Data from the last 4 weeks of activity has been analyzed.\n"
-    tweet1 += "These are the best 15 accounts I follow.\n"
-    tweet1 += "You should consider following them, too.\n\n"
-    tweet1 += "Top 3:\n"
-    for i, fren in enumerate(best_frens[:3]):
+    tweet1 = ""
+    tweet1 += f"The best {total} accounts I follow.\n"
+    tweet1 += "Go follow them!\n\n"
+    for i, fren in enumerate(best_frens[:sep]):
         at = '@'+fren.at
         if i == 0:
             tweet1 += '🥇'
@@ -283,8 +328,8 @@ def tweet_best_frens(frens):
             tweet1 += '🏅'
         tweet1 += ' ' + at + '\n'
 
-    tweet2 = "The next 12:\n"
-    for fren in best_frens[3:]:
+    tweet2 = ""
+    for fren in best_frens[sep:]:
         at = '@'+fren.at
         tweet2 += '🏅 ' + at + '\n'
 
@@ -299,9 +344,12 @@ def tweet_best_frens(frens):
         print("Not tweeted")
         return
 
-    t = api.update_status(tweet1, trim_user=True, wait_on_rate_limit=True)
+    t = api.update_status(tweet1, trim_user=True,
+                          wait_on_rate_limit=True,
+                          attachment_url=info_tweet_url)
     api.update_status(tweet2, trim_user=True,
-                      wait_on_rate_limit=True, in_reply_to_status_id=t.id)
+                      wait_on_rate_limit=True,
+                      in_reply_to_status_id=t.id)
 
 
 def unfollow_worst_frens(frens):
