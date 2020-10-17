@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import random
 import json
 import dataclasses
 import datetime
@@ -13,6 +14,7 @@ import urllib
 import logging
 import functools
 import textwrap
+import matplotlib.pyplot as plt
 import tweepy
 import jinja2
 
@@ -45,6 +47,37 @@ def format_float(f):
 def yesorno(prompt):
     a = input(prompt + ' ').lower()
     return a == 'y' or a == 'yes'
+
+
+class Config:
+    def __init__(self, filename):
+        self.filename = filename
+        with open(filename) as f:
+            config = json.load(f)
+
+        for key in config:
+            attrname = key.replace('-', '_')  # not foolproof but it will do
+            setattr(self, attrname, config[key])
+
+        self._api = None
+
+    def save(self):
+        config = {}
+        for attrname in self.__dict__:
+            if attrname.startswith('_'):
+                continue
+            key = attrname.replace('_', '-')  # again, not foolproof
+            config[key] = getattr(self, attrname)
+
+        with open(self.filename, 'w') as f:
+            json.dump(config, f)
+
+    def api(self):
+        if self._api is None:
+            auth = tweepy.OAuthHandler(self.api_key, self.api_secret)
+            auth.set_access_token(self.access_token, self.access_token_secret)
+            self._api = tweepy.API(auth)
+        return self._api
 
 
 @dataclasses.dataclass
@@ -125,20 +158,23 @@ def get_current_week_year():
     return week, year
 
 
-def get_api(config_file):
-    with open(config_file) as f:
-        config = json.load(f)
+def iter_week_year_backwards(week, year):
+    while True:
+        yield week, year
 
-    auth = tweepy.OAuthHandler(
-        config['api-key'], config['api-secret'])
-    auth.set_access_token(
-        config['access-token'], config['access-token-secret'])
+        if week == 1:
+            week = 52
+            year -= 1
+        else:
+            week -= 1
 
-    return tweepy.API(auth)
+        if year < 0:
+            break
 
 
-def create_fren_info(api):
+def create_fren_info(config):
     logging.warning("Creating fren info from Twitter API!")
+    api = config.api()
     me = api.me()
     users = {}
     for fren in tweepy.Cursor(
@@ -217,8 +253,12 @@ def create_fren_info(api):
     return list(users.values())
 
 
-def get_fren_info():
+def get_fren_info(config):
     week, year = get_current_week_year()
+    return get_fren_info_from(config, week, year, create=True)
+
+
+def get_fren_info_from(config, week, year, create=False):
     filename = f'frens_{week}_{year}.json'
 
     scriptpath = get_script_path()
@@ -226,10 +266,18 @@ def get_fren_info():
 
     if filepath.exists():
         with filepath.open() as f:
-            return load_fren_info(f)
+            try:
+                return load_fren_info(f)
+            except TypeError as e:
+                msg = e.args[0]
+                if '__init__() missing' in msg and \
+                   'required positional arguments:' in msg:
+                    return None
+                raise
     else:
-        api = get_api('config.json')
-        frens = create_fren_info(api)
+        if not create:
+            return None
+        frens = create_fren_info(config)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         with filepath.open('w') as f:
             save_fren_info(frens, f)
@@ -287,88 +335,106 @@ def create_info_tweet(api):
     return s.id
 
 
-def get_or_create_info_tweet(api, filename):
-    with open(filename) as f:
-        config = json.load(f)
-
+def get_or_create_info_tweet(config):
+    api = config.api()
     try:
-        info_tweet_id = config['info-tweet']
+        info_tweet_id = config.info_tweet
         api.get_status(info_tweet_id, trim_user=True, wait_on_rate_limit=True)
     except (KeyError, tweepy.error.TweepError):
         info_tweet_id = create_info_tweet(api)
-        config['info-tweet'] = info_tweet_id
-        with open(filename, 'w') as f:
-            json.dump(config, f)
+        config.info_tweet = info_tweet_id
+        config.save()
 
     return info_tweet_id
 
 
-def tweet_best_frens(frens):
-    api = get_api('config.json')
-    info_tweet = get_or_create_info_tweet(api, 'config.json')
+def tweet_best_frens(config, frens):
+    api = config.api()
+    info_tweet = get_or_create_info_tweet(config)
     info_tweet_url = f'https://twitter.com/{api.me().id}/status/{info_tweet}'
+    nbest = config.shoutouts
 
-    sep = 10
-    total = 20
     frens.sort(key=lambda fren: fren.score(), reverse=True)
-    best_frens = frens[:total]
+    best_frens = frens[:nbest]
 
-    tweet1 = ""
-    tweet1 += f"The best {total} accounts I follow.\n"
-    tweet1 += "Go follow them!\n\n"
-    for i, fren in enumerate(best_frens[:sep]):
-        at = '@'+fren.at
+    tweet = f"The best {nbest} accounts I follow.\nGo follow them!\n\n"
+    frens_in_tweet = 0
+    tweets = []
+    enum = enumerate(best_frens)
+    while True:
+        try:
+            i, fren = next(enum)
+        except StopIteration:
+            break
+
         if i == 0:
-            tweet1 += '🥇'
+            line = '🥇'
         elif i == 1:
-            tweet1 += '🥈'
+            line = '🥈'
         elif i == 2:
-            tweet1 += '🥉'
+            line = '🥉'
         else:
-            tweet1 += '🏅'
-        tweet1 += ' ' + at + '\n'
+            line = '🏅'
+        line += ' @' + fren.at + '\n'
 
-    tweet2 = ""
-    for fren in best_frens[sep:]:
-        at = '@'+fren.at
-        tweet2 += '🏅 ' + at + '\n'
+        tweet += line
+        frens_in_tweet += 1
+
+        if frens_in_tweet >= 10:
+            tweets.append(tweet)
+            tweet = ""
+            frens_in_tweet = 0
+    if tweet:
+        tweets.append(tweet)
 
     print("Gonna tweet the following:")
     print('='*15)
-    print(tweet1)
-    print('-'*15)
-    print(tweet2)
-    print('='*15)
+    for tweet in tweets:
+        print(tweet)
+        print('-'*15)
 
     if not yesorno("Tweet this?"):
         print("Not tweeted")
         return
 
-    t = api.update_status(tweet1, trim_user=True,
-                          wait_on_rate_limit=True,
-                          attachment_url=info_tweet_url)
-    api.update_status(tweet2, trim_user=True,
-                      wait_on_rate_limit=True,
-                      in_reply_to_status_id=t.id)
+    last_id = None
+    for tweet in tweets:
+        if last_id is None:
+            t = api.update_status(tweet, trim_user=True,
+                                  wait_on_rate_limit=True,
+                                  attachment_url=info_tweet_url)
+        else:
+            t = api.update_status(tweet, trim_user=True,
+                                  wait_on_rate_limit=True,
+                                  in_reply_to_status_id=last_id)
+        last_id = t.id
 
 
-def unfollow_worst_frens(frens):
-    api = get_api('config.json')
+def unfollow_worst_frens(config, frens):
+    nworst = config.unfollows
+    api = config.api()
 
     frens.sort(key=lambda fren: fren.score())
-    worst_score = frens[0].score()
+
+    i = 0
     worst_frens = []
-    for fren in frens:
-        if fren.score() <= worst_score:
-            worst_frens.append(fren)
-        else:
-            break
-    worst_frens.sort(key=lambda fren: int(
-        fren.follows_back)*100000 + fren.tweets)
+    while len(worst_frens) < nworst * 2:
+        worst_score = frens[i].score()
+        j = 0
+        for fren in frens[i:]:
+            if fren.score() <= worst_score:
+                j += 1
+                worst_frens.append(fren)
+            else:
+                break
+        i += j
+        random.shuffle(worst_frens)
 
     unfollowed = 0
-    for fren in worst_frens:
-        print("About to unfollow @" + fren.at)
+    while worst_frens:
+        fren = worst_frens.pop()
+        print("Consider unfollowing @" + fren.at)
+        print("Display name: " + fren.name)
         print(fren.url())
 
         if fren.follows_back:
@@ -380,13 +446,62 @@ def unfollow_worst_frens(frens):
         print(f"\t* RTs: {fren.retweeted} ({fren.retweeted_ratio()}%)")
         print(f"\t* QRTs: {fren.quoted} ({fren.quoted_ratio()}%)")
         print(f"\t* Replies: {fren.replied} ({fren.replied_ratio()}%)")
-        print(f"\t* SCORE: {fren.score()}")
+        print(f"\t* Score: {fren.score()}")
 
+        print()
+        if yesorno("Compute score analysis?"):
+            print("\tComputing score analysis...")
+            week, year = get_current_week_year()
+            datapoints = config.unfollow_analysis_datapoints_max
+            tags = []
+            scores = []
+
+            for week, year in iter_week_year_backwards(week, year):
+                info = get_fren_info_from(None, week, year)
+                if info is None:
+                    score = None
+                else:
+                    oldfren = [u for u in info if u.id == fren.id]
+                    if not oldfren:
+                        score = None
+                    else:
+                        score = oldfren[0].score()
+                # we count datapoints even if they're missing
+                datapoints -= 1
+                if score is not None:
+                    tags.append(f'{week},{year}')
+                    scores.append(score)
+                if datapoints <= 0:
+                    break
+
+            scores.reverse()
+            tags.reverse()
+
+            print()
+            print('\t\t+-----------+---------------+')
+            print('\t\t| week,year |         score |')
+            print('\t\t+-----------+---------------+')
+            for i in range(len(scores)):
+                print(f'\t\t| {tags[i]: <9} | {scores[i]: >13} |')
+            print('\t\t+-----------+---------------+')
+            print()
+
+            plt.plot(tags, scores, 'o-')
+            plt.xlabel("week,year")
+            plt.ylabel("score")
+            plt.xticks(rotation=45)
+            plt.subplots_adjust(bottom=0.20)
+            plt.show()
+            print("\tScore analysis plotted")
+
+        print()
         if yesorno("Unfollow?"):
             api.destroy_friendship(fren.id)
             unfollowed += 1
-            if unfollowed == 15:
+            if unfollowed >= nworst:
                 break
+        else:
+            worst_frens.insert(0, fren)
         print()
 
 
@@ -398,14 +513,15 @@ def main():
         print('\tunfollow')
         exit(1)
 
-    frens = get_fren_info()
+    config = Config('config.json')
+    frens = get_fren_info(config)
 
     if sys.argv[1] == 'show':
         show_fren_info(frens)
     elif sys.argv[1] == 'tweet':
-        tweet_best_frens(frens)
+        tweet_best_frens(config, frens)
     elif sys.argv[1] == 'unfollow':
-        unfollow_worst_frens(frens)
+        unfollow_worst_frens(config, frens)
 
 
 if __name__ == '__main__':
