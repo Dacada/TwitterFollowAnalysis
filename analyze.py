@@ -355,7 +355,7 @@ def tweet_best_frens(config, frens):
     nbest = config.shoutouts
 
     frens.sort(key=lambda fren: fren.score(), reverse=True)
-    best_frens = frens[:nbest]
+    best_frens = [fren for fren in frens if fren.follows_back][:nbest]
 
     tweet = f"The best {nbest} accounts I follow.\nGo follow them!\n\n"
     frens_in_tweet = 0
@@ -418,7 +418,8 @@ def unfollow_worst_frens(config, frens):
 
     i = 0
     worst_frens = []
-    while len(worst_frens) < nworst * 2:
+    unfollowed = 0
+    while not worst_frens and unfollowed < nworst:
         worst_score = frens[i].score()
         j = 0
         for fren in frens[i:]:
@@ -427,29 +428,26 @@ def unfollow_worst_frens(config, frens):
                 worst_frens.append(fren)
             else:
                 break
-        i += j
+            i += j
         random.shuffle(worst_frens)
 
-    unfollowed = 0
-    while worst_frens:
-        fren = worst_frens.pop()
-        print("Consider unfollowing @" + fren.at)
-        print("Display name: " + fren.name)
-        print(fren.url())
+        while worst_frens and unfollowed < nworst:
+            fren = worst_frens.pop()
+            print("Consider unfollowing @" + fren.at)
+            print("Display name: " + fren.name)
+            print(fren.url())
 
-        if fren.follows_back:
-            print("\t* Follows back.")
-        else:
-            print("\t* Does not follow back.")
-        print(f"\t* Tweets: {fren.tweets}")
-        print(f"\t* Likes: {fren.liked} ({fren.liked_ratio()}%)")
-        print(f"\t* RTs: {fren.retweeted} ({fren.retweeted_ratio()}%)")
-        print(f"\t* QRTs: {fren.quoted} ({fren.quoted_ratio()}%)")
-        print(f"\t* Replies: {fren.replied} ({fren.replied_ratio()}%)")
-        print(f"\t* Score: {fren.score()}")
+            if fren.follows_back:
+                print("\t* Follows back.")
+            else:
+                print("\t* Does not follow back.")
+            print(f"\t* Tweets: {fren.tweets}")
+            print(f"\t* Likes: {fren.liked} ({fren.liked_ratio()}%)")
+            print(f"\t* RTs: {fren.retweeted} ({fren.retweeted_ratio()}%)")
+            print(f"\t* QRTs: {fren.quoted} ({fren.quoted_ratio()}%)")
+            print(f"\t* Replies: {fren.replied} ({fren.replied_ratio()}%)")
+            print(f"\t* Score: {fren.score()}")
 
-        print()
-        if yesorno("Compute score analysis?"):
             print("\tComputing score analysis...")
             week, year = get_current_week_year()
             datapoints = config.unfollow_analysis_datapoints_max
@@ -466,8 +464,10 @@ def unfollow_worst_frens(config, frens):
                         score = None
                     else:
                         score = oldfren[0].score()
+
                 # we count datapoints even if they're missing
                 datapoints -= 1
+
                 if score is not None:
                     tags.append(f'{week},{year}')
                     scores.append(score)
@@ -493,16 +493,12 @@ def unfollow_worst_frens(config, frens):
             plt.subplots_adjust(bottom=0.20)
             plt.show()
             print("\tScore analysis plotted")
+            print()
 
-        print()
-        if yesorno("Unfollow?"):
-            api.destroy_friendship(fren.id)
-            unfollowed += 1
-            if unfollowed >= nworst:
-                break
-        else:
-            worst_frens.insert(0, fren)
-        print()
+            if yesorno("Unfollow?"):
+                api.destroy_friendship(fren.id)
+                unfollowed += 1
+            print()
 
 
 def main():
