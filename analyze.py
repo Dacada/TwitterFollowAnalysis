@@ -410,95 +410,106 @@ def tweet_best_frens(config, frens):
         last_id = t.id
 
 
+def compute_score_analysis(config, fren):
+    week, year = get_current_week_year()
+    datapoints = config.unfollow_analysis_datapoints_max
+    tags = []
+    scores = []
+
+    for week, year in iter_week_year_backwards(week, year):
+        info = get_fren_info_from(None, week, year)
+        if info is None:
+            score = None
+        else:
+            oldfren = [u for u in info if u.id == fren.id]
+            if not oldfren:
+                score = None
+            else:
+                score = oldfren[0].score()
+
+        # we count datapoints even if they're missing
+        datapoints -= 1
+
+        if score is not None:
+            tags.append(f'{week},{year}')
+            scores.append(score)
+        if datapoints <= 0:
+            break
+
+    scores.reverse()
+    tags.reverse()
+    return scores, tags
+
+
+def show_score_analysis(scores, tags):
+    print()
+    print('\t\t+-----------+---------------+')
+    print('\t\t| week,year |         score |')
+    print('\t\t+-----------+---------------+')
+    for i in range(len(scores)):
+        print(f'\t\t| {tags[i]: <9} | {scores[i]: >13} |')
+    print('\t\t+-----------+---------------+')
+    print()
+
+    plt.plot(tags, scores, 'o-')
+    plt.xlabel("week,year")
+    plt.ylabel("score")
+    plt.xticks(rotation=45)
+    plt.subplots_adjust(bottom=0.20)
+    plt.show()
+    print("\tScore analysis plotted")
+    print()
+
+
 def unfollow_worst_frens(config, frens):
     nworst = config.unfollows
     api = config.api()
 
-    frens.sort(key=lambda fren: fren.score())
+    frens.sort(key=lambda fren: (
+        fren.score(),
+        fren.follows_back,
+        fren.total_tweets
+    ))
 
-    i = 0
+    fren_score_analysis = {}
     worst_frens = []
-    unfollowed = 0
-    while not worst_frens and unfollowed < nworst:
-        worst_score = frens[i].score()
-        j = 0
-        for fren in frens[i:]:
-            if fren.score() <= worst_score:
-                j += 1
-                worst_frens.append(fren)
-            else:
-                break
-            i += j
-        random.shuffle(worst_frens)
+    for fren in frens:
+        if len(worst_frens) >= nworst:
+            break
+        scores, tags = compute_score_analysis(config, fren)
+        if len(scores) >= config.unfollow_datapoints_min:
+            fren_score_analysis[fren.id] = (scores, tags)
+            worst_frens.append(fren)
 
-        while worst_frens and unfollowed < nworst:
-            fren = worst_frens.pop()
-            print("Consider unfollowing @" + fren.at)
-            print("Display name: " + fren.name)
-            print(fren.url())
+    print("The following frens will be unfollowed:")
 
-            if fren.follows_back:
-                print("\t* Follows back.")
-            else:
-                print("\t* Does not follow back.")
-            print(f"\t* Tweets: {fren.tweets}")
-            print(f"\t* Likes: {fren.liked} ({fren.liked_ratio()}%)")
-            print(f"\t* RTs: {fren.retweeted} ({fren.retweeted_ratio()}%)")
-            print(f"\t* QRTs: {fren.quoted} ({fren.quoted_ratio()}%)")
-            print(f"\t* Replies: {fren.replied} ({fren.replied_ratio()}%)")
-            print(f"\t* Score: {fren.score()}")
+    for fren in worst_frens:
+        print("Will unfollow: @" + fren.at)
+        print("Display name: " + fren.name)
+        print(fren.url())
 
-            print("\tComputing score analysis...")
-            week, year = get_current_week_year()
-            datapoints = config.unfollow_analysis_datapoints_max
-            tags = []
-            scores = []
+        if fren.follows_back:
+            print("\t* Follows back.")
+        else:
+            print("\t* Does not follow back.")
+        print(f"\t* Tweets: {fren.tweets}")
+        print(f"\t* Likes: {fren.liked} ({fren.liked_ratio()}%)")
+        print(f"\t* RTs: {fren.retweeted} ({fren.retweeted_ratio()}%)")
+        print(f"\t* QRTs: {fren.quoted} ({fren.quoted_ratio()}%)")
+        print(f"\t* Replies: {fren.replied} ({fren.replied_ratio()}%)")
+        print(f"\t* Score: {fren.score()}")
 
-            for week, year in iter_week_year_backwards(week, year):
-                info = get_fren_info_from(None, week, year)
-                if info is None:
-                    score = None
-                else:
-                    oldfren = [u for u in info if u.id == fren.id]
-                    if not oldfren:
-                        score = None
-                    else:
-                        score = oldfren[0].score()
+        show_score_analysis(*fren_score_analysis[fren.id])
+        input("press Enter...")
 
-                # we count datapoints even if they're missing
-                datapoints -= 1
-
-                if score is not None:
-                    tags.append(f'{week},{year}')
-                    scores.append(score)
-                if datapoints <= 0:
-                    break
-
-            scores.reverse()
-            tags.reverse()
-
-            print()
-            print('\t\t+-----------+---------------+')
-            print('\t\t| week,year |         score |')
-            print('\t\t+-----------+---------------+')
-            for i in range(len(scores)):
-                print(f'\t\t| {tags[i]: <9} | {scores[i]: >13} |')
-            print('\t\t+-----------+---------------+')
-            print()
-
-            plt.plot(tags, scores, 'o-')
-            plt.xlabel("week,year")
-            plt.ylabel("score")
-            plt.xticks(rotation=45)
-            plt.subplots_adjust(bottom=0.20)
-            plt.show()
-            print("\tScore analysis plotted")
-            print()
-
-            if yesorno("Unfollow?"):
-                api.destroy_friendship(fren.id)
-                unfollowed += 1
-            print()
+    i = input('To execute the unfollowing type "Destroy Friendships": ')
+    if i == "Destroy Friendships":
+        for fren in worst_frens:
+            print("Unfollowing fren:", fren.name, f"({fren.at})...")
+            api.destroy_friendship(fren.id)
+        print("Frens unfollowed :(")
+    else:
+        print("No frens unfollowed today.")
 
 
 def main():
