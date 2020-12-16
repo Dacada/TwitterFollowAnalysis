@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import random
 import json
 import dataclasses
 import datetime
@@ -76,7 +75,9 @@ class Config:
         if self._api is None:
             auth = tweepy.OAuthHandler(self.api_key, self.api_secret)
             auth.set_access_token(self.access_token, self.access_token_secret)
-            self._api = tweepy.API(auth)
+            self._api = tweepy.API(auth,
+                                   wait_on_rate_limit=True,
+                                   wait_on_rate_limit_notify=True)
         return self._api
 
 
@@ -179,7 +180,6 @@ def create_fren_info(config):
     users = {}
     for fren in tweepy.Cursor(
             api.friends,
-            wait_on_rate_limit=True,
             count=200,
             skip_status=True,
             include_user_entities=False).items():
@@ -195,7 +195,6 @@ def create_fren_info(config):
         for tweet in tweepy.Cursor(
                 api.user_timeline,
                 fren.id,
-                wait_on_rate_limit=True,
                 count=200,
                 trim_user=True,
                 include_rts=True,
@@ -232,7 +231,6 @@ def create_fren_info(config):
     for tweet in tweepy.Cursor(
             api.user_timeline,
             me.id,
-            wait_on_rate_limit=True,
             count=200,
             trim_user=True,
             include_rts=True,
@@ -328,10 +326,9 @@ def show_fren_info(frens):
 
 def create_info_tweet(api):
     logging.warning("Creating info tweet!")
-    s = api.update_status(clean_whitespace(INFO_TWEET_TEXT_1), trim_user=True,
-                          wait_on_rate_limit=True)
+    s = api.update_status(clean_whitespace(INFO_TWEET_TEXT_1), trim_user=True)
     api.update_status(clean_whitespace(INFO_TWEET_TEXT_2), trim_user=True,
-                      wait_on_rate_limit=True, in_reply_to_status_id=s.id)
+                      in_reply_to_status_id=s.id)
     return s.id
 
 
@@ -339,7 +336,7 @@ def get_or_create_info_tweet(config):
     api = config.api()
     try:
         info_tweet_id = config.info_tweet
-        api.get_status(info_tweet_id, trim_user=True, wait_on_rate_limit=True)
+        api.get_status(info_tweet_id, trim_user=True)
     except (KeyError, tweepy.error.TweepError):
         info_tweet_id = create_info_tweet(api)
         config.info_tweet = info_tweet_id
@@ -401,11 +398,9 @@ def tweet_best_frens(config, frens):
     for tweet in tweets:
         if last_id is None:
             t = api.update_status(tweet, trim_user=True,
-                                  wait_on_rate_limit=True,
                                   attachment_url=info_tweet_url)
         else:
             t = api.update_status(tweet, trim_user=True,
-                                  wait_on_rate_limit=True,
                                   in_reply_to_status_id=last_id)
         last_id = t.id
 
@@ -512,23 +507,47 @@ def unfollow_worst_frens(config, frens):
         print("No frens unfollowed today.")
 
 
+# def get_follow_suggestions(config):
+#     api = config.api()
+
+#     frens = set(fren.id for fren in tweepy.Cursor(
+#         api.friends, skip_status=True, include_user_entities=False).items())
+#     followers = set(follower.id for follower in tweepy.Cursor(
+#         api.followers, skip_status=True, include_user_entities=False).items())
+#     possible_new_frens = followers.difference(frens)
+
+#     return possible_new_frens
+
+
+# def follow_suggestions(suggestions):
+#     pass
+
+
 def main():
     if len(sys.argv) < 2:
         print('call with an option, one of:')
         print('\tshow')
         print('\ttweet')
         print('\tunfollow')
+        # print('\tfollow')
         exit(1)
 
     config = Config('config.json')
-    frens = get_fren_info(config)
 
     if sys.argv[1] == 'show':
+        frens = get_fren_info(config)
         show_fren_info(frens)
     elif sys.argv[1] == 'tweet':
+        frens = get_fren_info(config)
         tweet_best_frens(config, frens)
     elif sys.argv[1] == 'unfollow':
+        frens = get_fren_info(config)
         unfollow_worst_frens(config, frens)
+    # elif sys.argv[1] == 'follow':
+    #     suggestions = get_follow_suggestions(config)
+    #     follow_suggestions(suggestions)
+    else:
+        print("unknown option:", sys.argv[1])
 
 
 if __name__ == '__main__':
