@@ -48,6 +48,26 @@ def yesorno(prompt):
     return a == 'y' or a == 'yes'
 
 
+def safe_tweepy_cursor(cursor):
+    while True:
+        try:
+            yield next(cursor)
+        except StopIteration:
+            return
+        except Exception as e:
+            print('Ignoring exception:')
+            print(e)
+
+
+def safe_tweepy_api_call(fun, *args, **kwargs):
+    while True:
+        try:
+            return fun(*args, **kwargs)
+        except Exception as e:
+            print('Ignoring exception:')
+            print(e)
+
+
 class Config:
     def __init__(self, filename):
         self.filename = filename
@@ -156,7 +176,7 @@ def get_current_week_year():
     now = datetime.datetime.now()
     week = now.isocalendar()[1]
     year = now.year
-    return week, year
+    return week % 53 + 1, year
 
 
 def iter_week_year_backwards(week, year):
@@ -176,15 +196,16 @@ def iter_week_year_backwards(week, year):
 def create_fren_info(config):
     logging.warning("Creating fren info from Twitter API!")
     api = config.api()
-    me = api.me()
+    me = safe_tweepy_api_call(api.me)
     users = {}
-    for fren in tweepy.Cursor(
+    for fren in safe_tweepy_cursor(tweepy.Cursor(
             api.friends,
             count=200,
             skip_status=True,
-            include_user_entities=False).items():
+            include_user_entities=False).items()):
         logging.warning(f"Processing fren {fren.name}...")
-        frenship = api.show_friendship(source_id=me.id, target_id=fren.id)
+        frenship = safe_tweepy_api_call(
+            api.show_friendship, source_id=me.id, target_id=fren.id)
         follows_back = frenship[1].following
 
         one_month_ago = datetime.datetime.now() - datetime.timedelta(days=30)
@@ -192,13 +213,23 @@ def create_fren_info(config):
         tweets = 0
         liked = 0
         retweeted = 0
-        for tweet in tweepy.Cursor(
-                api.user_timeline,
-                fren.id,
-                count=200,
-                trim_user=True,
-                include_rts=True,
-                exclude_replies=False).items():
+
+        items = safe_tweepy_cursor(tweepy.Cursor(
+            api.user_timeline,
+            fren.id,
+            count=200,
+            trim_user=True,
+            include_rts=True,
+            exclude_replies=False).items())
+        while True:
+            try:
+                tweet = next(items)
+            except StopIteration:
+                break
+            except tweepy.error.TweepError as e:
+                print(e)
+                continue
+
             if tweet.created_at < one_month_ago:
                 break
 
@@ -228,13 +259,13 @@ def create_fren_info(config):
             replied=0,
         )
 
-    for tweet in tweepy.Cursor(
+    for tweet in safe_tweepy_cursor(tweepy.Cursor(
             api.user_timeline,
             me.id,
             count=200,
             trim_user=True,
             include_rts=True,
-            exclude_replies=False).items():
+            exclude_replies=False).items()):
 
         if tweet.created_at < one_month_ago:
             break
@@ -326,9 +357,10 @@ def show_fren_info(frens):
 
 def create_info_tweet(api):
     logging.warning("Creating info tweet!")
-    s = api.update_status(clean_whitespace(INFO_TWEET_TEXT_1), trim_user=True)
-    api.update_status(clean_whitespace(INFO_TWEET_TEXT_2), trim_user=True,
-                      in_reply_to_status_id=s.id)
+    s = safe_tweepy_api_call(api.update_status, clean_whitespace(
+        INFO_TWEET_TEXT_1), trim_user=True)
+    safe_tweepy_api_call(api.update_status, clean_whitespace(INFO_TWEET_TEXT_2), trim_user=True,
+                         in_reply_to_status_id=s.id)
     return s.id
 
 
@@ -336,7 +368,7 @@ def get_or_create_info_tweet(config):
     api = config.api()
     try:
         info_tweet_id = config.info_tweet
-        api.get_status(info_tweet_id, trim_user=True)
+        safe_tweepy_api_call(api.get_status, info_tweet_id, trim_user=True)
     except (KeyError, tweepy.error.TweepError):
         info_tweet_id = create_info_tweet(api)
         config.info_tweet = info_tweet_id
@@ -348,11 +380,18 @@ def get_or_create_info_tweet(config):
 def tweet_best_frens(config, frens):
     api = config.api()
     info_tweet = get_or_create_info_tweet(config)
-    info_tweet_url = f'https://twitter.com/{api.me().id}/status/{info_tweet}'
+    info_tweet_url = f'https://twitter.com/{safe_tweepy_api_call(api.me).id}/status/{info_tweet}'
     nbest = config.shoutouts
 
     frens.sort(key=lambda fren: fren.score(), reverse=True)
-    best_frens = [fren for fren in frens if fren.follows_back][:nbest]
+    best_frens = []
+    for fren in frens:
+        if fren.follows_back:
+            user = safe_tweepy_api_call(api.get_user, fren.id)
+            if not user.protected:
+                best_frens.append(fren)
+        if len(best_frens) >= nbest:
+            break
 
     tweet = f"The best {nbest} accounts I follow.\nGo follow them!\n\n"
     frens_in_tweet = 0
@@ -397,11 +436,11 @@ def tweet_best_frens(config, frens):
     last_id = None
     for tweet in tweets:
         if last_id is None:
-            t = api.update_status(tweet, trim_user=True,
-                                  attachment_url=info_tweet_url)
+            t = safe_tweepy_api_call(api.update_status, tweet, trim_user=True,
+                                     attachment_url=info_tweet_url)
         else:
-            t = api.update_status(tweet, trim_user=True,
-                                  in_reply_to_status_id=last_id)
+            t = safe_tweepy_api_call(api.update_status, tweet, trim_user=True,
+                                     in_reply_to_status_id=last_id)
         last_id = t.id
 
 
@@ -471,6 +510,8 @@ def unfollow_worst_frens(config, frens):
     for fren in frens:
         if len(worst_frens) >= nworst:
             break
+        if fren.at in config.no_unfollow:
+            continue
         scores, tags = compute_score_analysis(config, fren)
         if len(scores) >= config.unfollow_datapoints_min:
             fren_score_analysis[fren.id] = (scores, tags)
@@ -501,7 +542,7 @@ def unfollow_worst_frens(config, frens):
     if i == "Destroy Friendships":
         for fren in worst_frens:
             print("Unfollowing fren:", fren.name, f"({fren.at})...")
-            api.destroy_friendship(fren.id)
+            safe_tweepy_api_call(api.destroy_friendship, fren.id)
         print("Frens unfollowed :(")
     else:
         print("No frens unfollowed today.")
